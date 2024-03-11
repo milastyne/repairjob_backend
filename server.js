@@ -12,7 +12,10 @@ const app = express();
 
 const isDebug = process.env.IS_DEBUG;
 
+const prefix = process.env.CODE_PREFIX;
+
 let db; // This will hold the database connection
+let dbConnectionError = null; // This will hold any error that occurs during DB connection
 
 // Function to construct MongoDB URI based on environment
 function getMongoDBUri() {
@@ -28,10 +31,11 @@ function getMongoDBUri() {
   }
 }
 
-// Initialize MongoDB Connection
+
+// Modify your connectToMongoDB function to catch errors more gracefully
 async function connectToMongoDB() {
   const uri = getMongoDBUri(); // Use the function to get the URI based on environment
-  const client = new MongoClient(uri); // Remove deprecated options
+  const client = new MongoClient(uri); // MongoClient should be defined/imported in your actual code
   
   try {
     await client.connect();
@@ -40,36 +44,16 @@ async function connectToMongoDB() {
     db = client.db(dbName); // Assign the database connection to the global variable
   } catch (err) {
     console.error('Failed to connect to MongoDB', err);
+    dbConnectionError = err; // Store the error for debugging
   }
 }
 
+// Call this at the appropriate place in your code
 connectToMongoDB().catch(console.error);
 
 
-connectToMongoDB().catch(console.error);
 
-
-
-/* // MongoDB setup
-const url = process.env.MONGODB_URI || 'mongodb://localhost:27017'; // Use MONGODB_URI from .env or fallback to localhost
-const dbName = 'repairjob_db';
-let db; // This will hold the database connection
-
-const isDebug = process.env.IS_DEBUG;
-
-// Initialize MongoDB Connection
-async function connectToMongoDB() {
-  const client = new MongoClient(url);
-  await client.connect();
-  console.log('Connected successfully to MongoDB');
-  db = client.db(dbName); // Assign the database connection to the global variable
-}
-
-connectToMongoDB().catch(console.error); */
-
-
-
-
+console.log("-->", process.env.REACT_URL);
 app.use(cors({
   origin: [process.env.REACT_URL],
   credentials: true,
@@ -78,11 +62,31 @@ app.use(cors({
 
 app.use(express.json());
 
-app.get('/', (req, res) => {
+/* app.get('/', (req, res) => {
   res.send('Hello, world! The repair tracking system is up and running!');
+}); */
+
+
+// Updated route for debugging
+app.get('/', (req, res) => {
+  const isProd = process.env.IS_PROD === 'true';
+  const debugInfo = {
+    message: 'Hello, world! The repair tracking system is up and running!',
+    environment: isProd ? 'Production' : 'Development',
+    mongoDBUri: getMongoDBUri(), // This exposes your URI which might have sensitive info - be cautious
+    dbConnectionError: dbConnectionError ? dbConnectionError.message : 'No connection error', // Only send the error message, not the entire error object
+  };
+
+  // Optionally remove sensitive info from URI in the response for security
+  if(debugInfo.mongoDBUri) {
+    debugInfo.mongoDBUri = debugInfo.mongoDBUri.replace(/mongodb\+srv:\/\/(.*):(.*)@/, 'mongodb+srv://[credentials_hidden]@');
+  }
+
+  // Send back the debug info as JSON
+  res.json(debugInfo);
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8000;
 const JWT_SECRET = process.env.JWT_SECRET; // Make sure to have a strong secret
 
 // Determine if HTTPS should be used based on an environment variable
@@ -152,6 +156,10 @@ app.post('/clients', authenticateToken, async (req, res) => {
 app.get('/clients', authenticateToken, async (req, res) => {
   try {
     const result = await db.collection("clients_collection").find({}).toArray();
+    console.log("-------------------------------------");
+    console.log("CLIENTS");
+    console.log("-------------------------------------");
+    console.log(result);
     res.status(200).json(result);
   } catch (error) {
     res.status(500).send(error.message);
@@ -173,6 +181,11 @@ app.get('/clients-with-devices', authenticateToken, async (req, res) => {
         devices,
       };
     }));
+
+    console.log("-------------------------------------");
+    console.log("CLIENTS WITH DEVICES");
+    console.log("-------------------------------------");
+    console.log(clientsWithDevices);
 
     res.status(200).json(clientsWithDevices);
   } catch (error) {
@@ -328,14 +341,29 @@ app.get('/client-details/:id', authenticateToken, async (req, res) => {
 //------------------------------------------------------------------------------------------------
 
 //Add
+
 app.post('/devices', authenticateToken, async (req, res) => {
+  console.log("Received request to add a new device with data:", req.body);
+
   try {
-    const result = await db.collection("devices_collection").insertOne(req.body);
+    // Convert clientId from string to ObjectId
+    const deviceDataWithObjectId = {
+      ...req.body,
+      clientID: new ObjectId(req.body.clientId),
+    };
+    console.log("Converted clientId to ObjectId, attempting to add device for clientId:", deviceDataWithObjectId.clientId);
+
+    const result = await db.collection("devices_collection").insertOne(deviceDataWithObjectId);
+    console.log("Device added successfully:", result);
+
     res.status(201).json(result);
   } catch (error) {
+    console.error("Failed to add device:", error);
     res.status(500).json({ message: error.message });
   }
 });
+
+
 
 
 //Read 
@@ -349,29 +377,71 @@ app.get('/devices',authenticateToken, async (req, res) => {
 });
 
 
-//Update
+
+// Update device
 app.put('/devices/:id', authenticateToken, async (req, res) => {
+  console.log("Updating device with ID:", req.params.id, "with data:", req.body);
   try {
     const result = await db.collection("devices_collection").updateOne(
       { _id: new ObjectId(req.params.id) },
       { $set: req.body }
     );
+    console.log("Update result:", result);
+    if (result.modifiedCount === 0) {
+      console.log("No documents were updated. This might be because the document does not exist or the data sent in request body is the same as the current one in the database.");
+      return res.status(404).json({ message: "Device not found or data unchanged" });
+    }
     res.status(200).json(result);
   } catch (error) {
+    console.error("Failed to update device:", error);
     res.status(500).json({ message: error.message });
   }
 });
 
 
-//delete
+
+/* //delete
 app.delete('/devices/:id', authenticateToken, async (req, res) => {
+  console.log("we are deleting")
   try {
-    const result = await db.collection("devices_collection").deleteOne({ _id: new ObjectId(req.params.id) });
-    res.status(200).json(result);
+    //const result = await db.collection("devices_collection").deleteOne({ _id: new ObjectId(req.params.id) });
+    //res.status(200).json(result);
+    
   } catch (error) {
+    //res.status(500).json({ message: error.message });
+  }
+}); */
+
+
+app.delete('/devices/:id', authenticateToken, async (req, res) => {
+  console.log("Attempting to delete a device and its jobs with ID:", req.params.id);
+  try {
+    // Step 1: Delete the device
+    const deviceDeletionResult = await db.collection("devices_collection").deleteOne({ _id: new ObjectId(req.params.id) });
+    console.log(`Device deletion result for ID ${req.params.id}:`, deviceDeletionResult.deletedCount);
+
+    // Check if device was actually deleted before attempting to delete jobs
+    if (deviceDeletionResult.deletedCount === 0) {
+      console.log(`No device found with ID ${req.params.id}, hence no jobs deleted.`);
+      return res.status(404).json({ message: "Device not found" });
+    }
+
+    // Step 2: Delete all related jobs (repairs)
+    const jobsDeletionResult = await db.collection("repairs_collection").deleteMany({ deviceID: new ObjectId(req.params.id) });
+    console.log(`Jobs deletion result for device ID ${req.params.id}:`, jobsDeletionResult.deletedCount);
+
+    // Respond with the results of both operations
+    res.status(200).json({
+      message: "Device and related jobs deleted successfully",
+      deviceDeletionCount: deviceDeletionResult.deletedCount,
+      jobsDeletionCount: jobsDeletionResult.deletedCount,
+    });
+  } catch (error) {
+    console.error("Failed to delete device and related jobs:", error);
     res.status(500).json({ message: error.message });
   }
 });
+
 
 
 
@@ -422,8 +492,14 @@ app.post('/repairs', authenticateToken, async (req, res) => {
       deviceID = new ObjectId(device._id);
     }
 
+    
     // Generate a unique code for the job
-    const uniqueCode = generateUniqueCode(); // Ensure this function is implemented and generates a unique code
+    //const uniqueCode = generateUniqueCode(); // Ensure this function is implemented and generates a unique code
+    const uniqueCode = "RJFM-" + await getNextJobID();
+    console.log(uniqueCode);
+
+
+
 
     // Prepare and insert the new job
     const newJobData = {
@@ -447,9 +523,28 @@ app.post('/repairs', authenticateToken, async (req, res) => {
 });
 
 
+async function getNextJobID() {
+  try {
+    // Find the counter document (your jobid collection should have only one document)
+    const counterDoc = await db.collection("jobsid_collection").findOne(); 
 
+    // Increment the sequence
+    const result = await db.collection("jobsid_collection").findOneAndUpdate(
+      { _id: counterDoc._id },  // Target the document using its existing _id
+      { $inc: { sequence_value: 1 } }, 
+      { returnNewDocument: true } 
+    );
 
+    //console.log("result:", result);
+    //console.log("result2:", result.sequence_value + 1);
+    return result.sequence_value + 1; 
+  } catch (error) {
+    console.error("Error getting next job ID:", error);
+    throw error; 
+  }
+}
 
+/*
 function generateUniqueCode() {
   // Get the current date and time
   const now = new Date();
@@ -463,12 +558,11 @@ function generateUniqueCode() {
   const minutes = now.getMinutes().toString().padStart(2, '0');
   const seconds = now.getSeconds().toString().padStart(2, '0');
 
-  const prefix = env.process.CODE_PREFIX;
   // Construct the code
   const code = `${prefix}-${day}${month}${year}-${hours}${minutes}${seconds}`;
 
   return code;
-}
+}*/
 
 
 // Endpoint to fetch a specific job's details along with the related device and client
@@ -682,24 +776,42 @@ app.get('/repair-jobs', authenticateToken, async (req, res) => {
       console.log()
     }
 
+
     let allJobsDetails = await Promise.all(repairJobs.map(async (job) => {
       const device = await db.collection("devices_collection").findOne({ _id: new ObjectId(job.deviceID) });
+      
+      // If the device is not found, skip or handle accordingly
+      if (!device) {
+        console.log(`Device not found for job ID: ${job._id}`);
+        // Skip this job or handle the missing device case here
+        // For example, return null and filter out later, or return a job with placeholder device info
+        return null; // Example: Skipping the job
+      }
+      
       const client = await db.collection("clients_collection").findOne({ _id: new ObjectId(device.clientID) });
-
-      // Assuming client and device are always found. Add null checks if necessary.
+      
+      // It's also a good idea to check if client is null
+      if (!client) {
+        console.log(`Client not found for device ID: ${job.deviceID}`);
+        // Handle the missing client case similarly
+        return null; // Or handle differently
+      }
+      
+      // Proceed with job detail assembly as before
       return {
         ...job,
         deviceType: device.type,
         brand: device.brand,
         model: device.model,
-        // issue and notes are now correctly taken from the job object itself
         issue: job.issue,
         notes: job.notes,
         emergencyLevel: job.emergencyLevel,
         clientName: `${client.firstName} ${client.lastName}`,
         clientEmail: client.email,
+        clientPhone: client.phoneNumber,
       };
-    }));
+    })).then(results => results.filter(job => job !== null)); // Filter out any nulls from skipped jobs
+    
 
     // Sorting logic remains the same
 
@@ -730,23 +842,11 @@ app.get('/repair-jobs', authenticateToken, async (req, res) => {
   });
   
 
-/*     allJobsDetails.sort((a, b) => {
-      // First, sort by status
-      if (statusOrder[a.status] !== statusOrder[b.status]) {
-        return statusOrder[b.status] - statusOrder[a.status];
-      }
-      // If statuses are the same and not 'Completed', sort by emergency level
-      if (a.status !== 'Completed' && b.status !== 'Completed') {
-        if (emergencyLevels[b.emergencyLevel] !== emergencyLevels[a.emergencyLevel]) {
-          return emergencyLevels[b.emergencyLevel] - emergencyLevels[a.emergencyLevel];
-        }
-      }
-    });    */
-
 
     res.status(200).json(allJobsDetails);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ message : error.message });
+    
   }
 });
 
