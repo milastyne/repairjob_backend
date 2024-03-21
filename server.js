@@ -194,6 +194,161 @@ app.get('/clients-with-devices', authenticateToken, async (req, res) => {
 });
 
 
+app.get('/clients-with-devices-and-jobs', authenticateToken, async (req, res) => {
+  try {
+    const clients = await db.collection("clients_collection").find().toArray();
+
+    const clientsWithDevicesAndJobs = await Promise.all(clients.map(async (client) => {
+      const devices = await db.collection("devices_collection").find({ clientID: client._id }).toArray();
+      
+      // For each device, fetch jobs that are not in status 'status5'
+      const devicesWithJobs = await Promise.all(devices.map(async (device) => {
+        const jobs = await db.collection("repairs_collection").find({
+          deviceID: device._id,
+          status: { $ne: 'status5' } // Exclude jobs with status 'status5'
+        }).toArray();
+
+        // Only return device if it has jobs that are not in status 'status5'
+        if (jobs.length > 0) {
+          return {
+            ...device,
+            jobs,
+          };
+        } else {
+          return null; // Device has no jobs or all jobs are in status 'status5', so it's excluded
+        }
+      }));
+
+      // Filter out null values from devicesWithJobs, which indicates devices without relevant jobs
+      const filteredDevicesWithJobs = devicesWithJobs.filter(device => device !== null);
+
+      return {
+        ...client,
+        devices: filteredDevicesWithJobs,
+      };
+    }));
+
+    console.log("-------------------------------------");
+    console.log("CLIENTS WITH DEVICES AND JOBS");
+    console.log("-------------------------------------");
+    console.log(clientsWithDevicesAndJobs);
+
+    res.status(200).json(clientsWithDevicesAndJobs);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+
+app.get('/client/:clientId/devices-and-jobs', authenticateToken, async (req, res) => {
+  const clientId = req.params.clientId;
+  const excludeStatus = req.query.excludeStatus; // "status5" or any other status you want to exclude
+  const includeWithoutJobs = req.query.includeWithoutJobs === 'true'; // Convert string to boolean
+
+  try {
+    const client = await db.collection("clients_collection").findOne({ _id: new ObjectId(clientId) });
+    if (!client) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+
+    const devices = await db.collection("devices_collection").find({ clientID: new ObjectId(clientId) }).toArray();
+
+    const devicesWithJobs = await Promise.all(devices.map(async (device) => {
+      const query = { deviceID: device._id };
+      if (excludeStatus) {
+        query.status = { $ne: excludeStatus }; // Dynamically exclude specified status
+      }
+      const jobs = await db.collection("repairs_collection").find(query).toArray();
+
+      if (jobs.length > 0 || includeWithoutJobs) {
+        // Include device if it has jobs not in excludeStatus or if including devices without jobs
+        return {
+          ...device,
+          jobs,
+        };
+      }
+      return null; // Exclude device if it has no jobs or all jobs are in excludeStatus
+    }));
+
+    const filteredDevicesWithJobs = devicesWithJobs.filter(device => device !== null);
+
+    console.log("-------------------------------------");
+    console.log("CLIENT WITH DEVICES");
+    console.log("-------------------------------------");
+    console.log("client id :" + clientId);
+    console.log(filteredDevicesWithJobs);
+
+
+    res.status(200).json({
+      ...client,
+      devices: filteredDevicesWithJobs,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+
+
+/* app.get('/client/:clientId/devices-and-jobs', authenticateToken, async (req, res) => {
+  const clientId = req.params.clientId; // Get the client ID from the request parameters
+
+  console.log("ici?????");
+
+  try {
+    // Fetch the client by ID
+    const client = await db.collection("clients_collection").findOne({ _id: new ObjectId(clientId) });
+
+    if (!client) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+
+    // Fetch devices belonging to the client
+    const devices = await db.collection("devices_collection").find({ clientID: new ObjectId(clientId) }).toArray();
+    
+    // For each device, fetch jobs that are not in status 'status5'
+    const devicesWithJobs = await Promise.all(devices.map(async (device) => {
+      const jobs = await db.collection("repairs_collection").find({
+        deviceID: device._id,
+        status: { $ne: 'status5' } // Exclude jobs with status 'status5'
+      }).toArray();
+
+      // Only include device if it has jobs that are not in status 'status5'
+      if (jobs.length > 0) {
+        return {
+          ...device,
+          jobs,
+        };
+      } else {
+        return null; // Device has no jobs or all jobs are in status 'status5', so it's excluded
+      }
+    }));
+
+    // Filter out null values from devicesWithJobs, which indicates devices without relevant jobs
+    const filteredDevicesWithJobs = devicesWithJobs.filter(device => device !== null);
+
+
+    console.log("-------------------------------------");
+    console.log("CLIENT WITH DEVICES");
+    console.log("-------------------------------------");
+    console.log("client id :" + clientId);
+    console.log(filteredDevicesWithJobs);
+
+    // Return the client with their devices that have at least one job not in status 'status5'
+    res.status(200).json({
+      ...client,
+      devices: filteredDevicesWithJobs,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: error.message });
+  }
+});  */
+
+
+
+
 
 // Update
 app.put('/clients/:id', authenticateToken, async (req, res) => {
@@ -284,6 +439,7 @@ app.get('/client-details/:id', authenticateToken, async (req, res) => {
         deviceType: device.type,
         brand: device.brand,
         model: device.model,
+        serial: device.serial,
         issue: job.issue,
         notes: job.notes,
         emergencyLevel: job.emergencyLevel,
@@ -300,25 +456,15 @@ app.get('/client-details/:id', authenticateToken, async (req, res) => {
 
     // Define a map for emergency levels and statuses to sort by
     const emergencyLevels = { 'High': 3, 'Medium': 2, 'Low': 1 };
-    const statusOrder = { 'In Progress': 3, 'Pending': 2, 'Completed': 1 };
+    const statusOrder = { 'status1': 1, 'status2': 2, 'status3': 3, 'status4': 4, 'status5': 5 };
 
-    clientDetails.sort((a, b) => {
-      // Sort by entry date in descending order first
-      const dateComparison = new Date(b.entryDate) - new Date(a.entryDate);
-      if (dateComparison !== 0) return dateComparison;
-    
+    allJobsDetails.sort((a, b) => {
+  
       // If entry dates are the same or if sorting by entry date is not desired at this point,
       // proceed to sort by status
       if (statusOrder[a.status] !== statusOrder[b.status]) {
-        return statusOrder[b.status] - statusOrder[a.status];
+        return statusOrder[a.status] - statusOrder[b.status];
       }
-    
-      // If statuses are the same and not 'Completed', sort by emergency level
-      if (a.status !== 'Completed' && b.status !== 'Completed') {
-        return emergencyLevels[b.emergencyLevel] - emergencyLevels[a.emergencyLevel];
-      }
-    
-      // Additional sorting logic if needed
     
       return 0; // In case all other conditions are equal
     });
@@ -484,7 +630,8 @@ app.post('/repairs', authenticateToken, async (req, res) => {
         clientID: new ObjectId(clientID),
         type: device.type,
         brand: device.brand,
-        model: device.model
+        model: device.model,
+        serial: device.serial,
       };
       const deviceResult = await db.collection("devices_collection").insertOne(newDeviceData);
       deviceID = deviceResult.insertedId;
@@ -495,7 +642,7 @@ app.post('/repairs', authenticateToken, async (req, res) => {
     
     // Generate a unique code for the job
     //const uniqueCode = generateUniqueCode(); // Ensure this function is implemented and generates a unique code
-    const uniqueCode = "RJFM-" + await getNextJobID();
+    const uniqueCode = prefix + await getNextJobID();
     console.log(uniqueCode);
 
 
@@ -567,6 +714,10 @@ function generateUniqueCode() {
 
 // Endpoint to fetch a specific job's details along with the related device and client
 app.get('/repairs_get_infos/:jobId', authenticateToken, async (req, res) => {
+
+  console.log("----------------------");
+  console.log("----------------------");
+
   
   try {
     const { jobId } = req.params;
@@ -577,21 +728,8 @@ app.get('/repairs_get_infos/:jobId', authenticateToken, async (req, res) => {
       return res.status(404).json({ message: "Job not found" });
     }
 
-    // Fetch the related device
-    const device = await db.collection("devices_collection").findOne({ _id: job.deviceID });
-    if (!device) {
-      return res.status(404).json({ message: "Device not found for this job" });
-    }
-
-    // Fetch the client related to the device
-    const client = await db.collection("clients_collection").findOne({ _id: device.clientID });
-    if (!client) {
-      return res.status(404).json({ message: "Client not found for this device" });
-    }
-
     // Construct the response object with job, device, and client details
     const responseObj = {
-      job: {
         id: job._id,
         entryDate: job.entryDate,
         exitDate: job.exitDate,
@@ -600,23 +738,11 @@ app.get('/repairs_get_infos/:jobId', authenticateToken, async (req, res) => {
         uniqueCode: job.uniqueCode,
         issue: job.issue,
         notes: job.notes
-      },
-      device: {
-        id: device._id,
-        type: device.type,
-        brand: device.brand,
-        model: device.model
-      },
-      client: {
-        id: client._id,
-        firstName: client.firstName,
-        lastName: client.lastName,
-        phoneNumber: client.phoneNumber,
-        email: client.email
-      }
     };
 
     if(isDebug) {
+      console.log("----------------");
+      console.log("JOB INFOS");
       console.log("----------------");
       console.log (responseObj);
       console.log("----------------");
@@ -649,36 +775,9 @@ app.put('/repairs/:id', authenticateToken, async (req, res) => {
 
     // Initialize clientID and deviceID
     let clientID, deviceID;
-
-    // Check for client updates or additions
-    if (client._id === "new") {
-      // Insert new client and get ID
-      const clientResult = await db.collection("clients_collection").insertOne({
-        firstName: client.firstName,
-        lastName: client.lastName,
-        phoneNumber: client.phoneNumber,
-        email: client.email,
-      });
-      clientID = clientResult.insertedId;
-    } else {
-      // Use existing client ID
-      clientID = new ObjectId(client._id);
-    }
-
-    // Check for device updates or additions
-    if (device._id === "new") {
-      // Insert new device and get ID
-      const deviceResult = await db.collection("devices_collection").insertOne({
-        clientID: clientID,
-        type: device.type,
-        brand: device.brand,
-        model: device.model,
-      });
-      deviceID = deviceResult.insertedId;
-    } else {
-      // Use existing device ID
-      deviceID = new ObjectId(device._id);
-    }
+    clientID = new ObjectId(client._id);
+    deviceID = new ObjectId(device._id);
+    
 
     // Update the repair job
     const updateResult = await db.collection("repairs_collection").updateOne(
@@ -731,7 +830,7 @@ app.put('/repairs_status/:id', authenticateToken, async (req, res) => {
     const updateData = { status };
     if (exitDate) {
       updateData.exitDate = new Date(exitDate); // Format the provided exit date
-    } else if (status === "Completed") {
+    } else if (status === "status5") {
       updateData.exitDate = new Date(); // Use current date if marking as completed without a specific exit date
     }
 
@@ -800,13 +899,18 @@ app.get('/repair-jobs', authenticateToken, async (req, res) => {
       // Proceed with job detail assembly as before
       return {
         ...job,
+        deviceID : device._id,
         deviceType: device.type,
         brand: device.brand,
         model: device.model,
+        serial: device.serial,
         issue: job.issue,
         notes: job.notes,
         emergencyLevel: job.emergencyLevel,
+        clientID : client._id,
         clientName: `${client.firstName} ${client.lastName}`,
+        clientFirstname : client.firstName,
+        clientLastname : client.lastName,
         clientEmail: client.email,
         clientPhone: client.phoneNumber,
       };
@@ -818,30 +922,20 @@ app.get('/repair-jobs', authenticateToken, async (req, res) => {
 
 
   const emergencyLevels = { 'High': 3, 'Medium': 2, 'Low': 1 };
-  const statusOrder = { 'In Progress': 3, 'Pending': 2, 'Completed': 1 };
+  const statusOrder = { 'status1': 1, 'status2': 2, 'status3': 3, 'status4': 4, 'status5': 5 };
 
   allJobsDetails.sort((a, b) => {
-    // Sort by entry date in descending order first
-    const dateComparison = new Date(b.entryDate) - new Date(a.entryDate);
-    if (dateComparison !== 0) return dateComparison;
   
     // If entry dates are the same or if sorting by entry date is not desired at this point,
     // proceed to sort by status
     if (statusOrder[a.status] !== statusOrder[b.status]) {
-      return statusOrder[b.status] - statusOrder[a.status];
+      return statusOrder[a.status] - statusOrder[b.status];
     }
-  
-    // If statuses are the same and not 'Completed', sort by emergency level
-    if (a.status !== 'Completed' && b.status !== 'Completed') {
-      return emergencyLevels[b.emergencyLevel] - emergencyLevels[a.emergencyLevel];
-    }
-  
-    // Additional sorting logic if needed
   
     return 0; // In case all other conditions are equal
   });
   
-
+    console.log(allJobsDetails);
 
     res.status(200).json(allJobsDetails);
   } catch (error) {
