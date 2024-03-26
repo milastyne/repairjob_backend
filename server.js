@@ -166,6 +166,56 @@ app.get('/clients', authenticateToken, async (req, res) => {
   }
 });
 
+app.get('/clients-infinite', authenticateToken, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const pageSize = parseInt(req.query.pageSize) || 20;
+    const searchTerm = req.query.searchTerm || '';
+    const skip = (page - 1) * pageSize;
+
+    let query = {};
+    if (searchTerm) {
+      query = {
+        $or: [
+          { firstName: new RegExp(searchTerm, 'i') },
+          { lastName: new RegExp(searchTerm, 'i') },
+          /* { email: new RegExp(searchTerm, 'i') } */
+        ]
+      };
+    }
+
+    const result = await db.collection("clients_collection")
+                           .find(query)
+                           .skip(skip)
+                           .limit(pageSize)
+                           .toArray();
+    const totalDocuments = await db.collection("clients_collection").countDocuments(query);
+    const totalPages = Math.ceil(totalDocuments / pageSize);
+
+    console.log('-------------------------');
+    console.log('RESULT PAGINATION');
+    console.log('-------------------------');
+    console.log('searchTerm', searchTerm);
+    console.log('clients', result);
+    console.log('page', page);
+    console.log('totalDocuments', totalDocuments);
+    console.log('-------------------------');
+
+    res.status(200).json({
+      clients: result,
+      currentPage: page,
+      totalPages: totalPages,
+      totalDocuments: totalDocuments,
+      hasMore: page < totalPages
+    });
+  } catch (error) {
+    res.status(500).send(error.message);
+  }
+});
+
+
+
+
 
 
 app.get('/clients-with-devices', authenticateToken, async (req, res) => {
