@@ -33,7 +33,7 @@ function getMongoDBUri() {
 
 
 // Modify your connectToMongoDB function to catch errors more gracefully
-async function connectToMongoDB() {
+/* async function connectToMongoDB() {
   const uri = getMongoDBUri(); // Use the function to get the URI based on environment
   const client = new MongoClient(uri); // MongoClient should be defined/imported in your actual code
   
@@ -46,7 +46,42 @@ async function connectToMongoDB() {
     console.error('Failed to connect to MongoDB', err);
     dbConnectionError = err; // Store the error for debugging
   }
+} */
+
+
+async function connectToMongoDB() {
+  const uri = getMongoDBUri();
+  dbClient = new MongoClient(uri);
+  
+  try {
+    await dbClient.connect();
+    console.log('Connected successfully to MongoDB');
+    const dbName = process.env.MONGODB_DBNAME;
+    db = dbClient.db(dbName); // Assign the database connection to the global variable
+  } catch (err) {
+    console.error('Failed to connect to MongoDB', err);
+    // Optionally, you could handle retries here
+  }
 }
+
+// Function to check the connection and reconnect if necessary
+async function checkAndReconnectDB(req, res, next) {
+  try {
+    // Check if the client is connected
+    await dbClient.db(process.env.MONGODB_DBNAME).command({ ping: 1 });
+    console.log('MongoDB is connected');
+    next(); // Proceed to the next middleware/route handler
+  } catch (err) {
+    console.log('MongoDB connection lost. Attempting to reconnect...');
+    // Attempt to reconnect
+    await connectToMongoDB();
+    next(); // Proceed to the next middleware/route handler
+  }
+}
+
+// Use checkAndReconnectDB as a middleware for your routes
+app.use(checkAndReconnectDB);
+
 
 // Call this at the appropriate place in your code
 connectToMongoDB().catch(console.error);
@@ -423,7 +458,7 @@ app.delete('/clients/:id', authenticateToken, async (req, res) => {
   }
 }); */
 
-// Delete client and associated devices and repairs
+/* // Delete client and associated devices and repairs
 app.delete('/clients/:id', authenticateToken, async (req, res) => {
   const clientId = new ObjectId(req.params.id);
 
@@ -445,7 +480,45 @@ app.delete('/clients/:id', authenticateToken, async (req, res) => {
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
+}); */
+
+
+// Delete client and associated devices and repairs
+app.delete('/clients/:id', authenticateToken, async (req, res) => {
+  const clientId = new ObjectId(req.params.id);
+  console.log(`Attempting to delete client with ID: ${clientId}`);
+
+  try {
+    // Step 1: Identify and delete all devices associated with the client
+    const devices = await db.collection("devices_collection").find({ clientID: clientId }).toArray();
+    console.log(`Found ${devices.length} devices for client ${clientId}.`);
+
+    if (devices.length > 0) {
+      const deviceIds = devices.map(device => device._id);
+      console.log(`Deleting devices with IDs: ${deviceIds.join(', ')}`);
+      // Delete these devices
+      const devicesDeletionResult = await db.collection("devices_collection").deleteMany({ _id: { $in: deviceIds } });
+      console.log(`Deleted ${devicesDeletionResult.deletedCount} devices.`);
+
+      // Step 2: Delete all repair jobs associated with these devices
+      console.log(`Deleting repair jobs for devices with IDs: ${deviceIds.join(', ')}`);
+      const repairsDeletionResult = await db.collection("repairs_collection").deleteMany({ deviceID: { $in: deviceIds } });
+      console.log(`Deleted ${repairsDeletionResult.deletedCount} repair jobs.`);
+    } else {
+      console.log(`No devices found for client ${clientId}. Skipping device and repair job deletion.`);
+    }
+
+    // Step 3: Finally, delete the client
+    console.log(`Deleting client with ID: ${clientId}`);
+    const result = await db.collection("clients_collection").deleteOne({ _id: clientId });
+    console.log(`Client deletion result:`, result);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error(`Error deleting client with ID ${clientId}:`, error);
+    res.status(500).json({ message: error.message });
+  }
 });
+
 
 
 
