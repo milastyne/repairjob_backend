@@ -151,7 +151,11 @@ function authenticateToken(req, res, next) {
     req.user = user;
     next();
   });
-}
+} 
+
+
+
+
 
 // Token generation endpoint
 app.get('/get-token', (req, res) => {
@@ -162,15 +166,55 @@ app.get('/get-token', (req, res) => {
 });
 
 
+// Token generation for log in
+app.post('/login', (req, res) => {
+  const { password } = req.body;
+
+  if (password === process.env.USER_PASSWORD) {
+    const userPayload = { role: 'user' };
+    const userToken = jwt.sign(userPayload, JWT_SECRET, { expiresIn: '24h' }); // Adjust expiresIn as needed
+
+    return res.json({ userToken });
+  } else {
+    return res.status(401).json({ message: "Invalid password" });
+  }
+});
+
+
+function identifiedUser(req, res, next) {
+  const userToken = req.headers['user-authorization'];
+  
+  if (!userToken) {
+    return res.sendStatus(401); // Unauthorized if token is not present
+  }
+
+  jwt.verify(userToken, JWT_SECRET, (err, decoded) => {
+    if (err) {
+      return res.sendStatus(403); // Forbidden if token is invalid
+    }
+
+    // Optional: Verify any additional payload information here
+    if (decoded.role !== 'user') {
+      return res.sendStatus(403); // Forbidden if the role is not user
+    }
+
+    // If the token is valid, proceed to the next middleware/route handler
+    next();
+  });
+}
+
+
+
 
 
 //------------------------------------------------------------------------------------------------
 //                        TEST ROUTE
 //------------------------------------------------------------------------------------------------
 
-app.get('/protected', authenticateToken, (req, res) => {
+app.get('/protected', authenticateToken,  (req, res) => {
   res.json({ message: "This is protected data." });
 });
+
 
 
 //------------------------------------------------------------------------------------------------
@@ -178,7 +222,7 @@ app.get('/protected', authenticateToken, (req, res) => {
 //------------------------------------------------------------------------------------------------
 
 // Add
-app.post('/clients', authenticateToken, async (req, res) => {
+app.post('/clients', authenticateToken,  async (req, res) => {
   try {
     const result = await db.collection("clients_collection").insertOne(req.body);
     res.status(201).send(result);
@@ -188,7 +232,7 @@ app.post('/clients', authenticateToken, async (req, res) => {
 });
 
 // Read
-app.get('/clients', authenticateToken, async (req, res) => {
+app.get('/clients', authenticateToken,  async (req, res) => {
   try {
     const result = await db.collection("clients_collection").find({}).toArray();
     console.log("-------------------------------------");
@@ -201,7 +245,7 @@ app.get('/clients', authenticateToken, async (req, res) => {
   }
 });
 
-app.get('/clients-infinite', authenticateToken, async (req, res) => {
+app.get('/clients-infinite', authenticateToken,  async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const pageSize = parseInt(req.query.pageSize) || 20;
@@ -253,7 +297,7 @@ app.get('/clients-infinite', authenticateToken, async (req, res) => {
 
 
 
-app.get('/clients-with-devices', authenticateToken, async (req, res) => {
+app.get('/clients-with-devices', authenticateToken,  async (req, res) => {
 
   try {
     const clients = await db.collection("clients_collection").find().toArray();
@@ -279,7 +323,7 @@ app.get('/clients-with-devices', authenticateToken, async (req, res) => {
 });
 
 
-app.get('/clients-with-devices-and-jobs', authenticateToken, async (req, res) => {
+app.get('/clients-with-devices-and-jobs', authenticateToken,  async (req, res) => {
   try {
     const clients = await db.collection("clients_collection").find().toArray();
 
@@ -325,7 +369,7 @@ app.get('/clients-with-devices-and-jobs', authenticateToken, async (req, res) =>
 });
 
 
-app.get('/client/:clientId/devices-and-jobs', authenticateToken, async (req, res) => {
+app.get('/client/:clientId/devices-and-jobs', authenticateToken,  async (req, res) => {
   const clientId = req.params.clientId;
   const excludeStatus = req.query.excludeStatus; // "status5" or any other status you want to exclude
   const includeWithoutJobs = req.query.includeWithoutJobs === 'true'; // Convert string to boolean
@@ -436,7 +480,7 @@ app.get('/client/:clientId/devices-and-jobs', authenticateToken, async (req, res
 
 
 // Update
-app.put('/clients/:id', authenticateToken, async (req, res) => {
+app.put('/clients/:id', authenticateToken,   async (req, res) => {
   try {
     const result = await db.collection("clients_collection").updateOne(
       { _id: new ObjectId(req.params.id) },
@@ -484,7 +528,7 @@ app.delete('/clients/:id', authenticateToken, async (req, res) => {
 
 
 // Delete client and associated devices and repairs
-app.delete('/clients/:id', authenticateToken, async (req, res) => {
+app.delete('/clients/:id', authenticateToken,  async (req, res) => {
   const clientId = new ObjectId(req.params.id);
   console.log(`Attempting to delete client with ID: ${clientId}`);
 
@@ -522,7 +566,7 @@ app.delete('/clients/:id', authenticateToken, async (req, res) => {
 
 
 
-app.get('/client-details/:id', authenticateToken, async (req, res) => {
+app.get('/client-details/:id', authenticateToken,  async (req, res) => {
   try {
 
     console.log("Client ID:", '*' + req.params.id + '*');
@@ -611,7 +655,7 @@ app.get('/client-details/:id', authenticateToken, async (req, res) => {
 
 //Add
 
-app.post('/devices', authenticateToken, async (req, res) => {
+app.post('/devices', authenticateToken,  async (req, res) => {
   console.log("Received request to add a new device with data:", req.body);
 
   try {
@@ -636,7 +680,7 @@ app.post('/devices', authenticateToken, async (req, res) => {
 
 
 //Read 
-app.get('/devices',authenticateToken, async (req, res) => {
+app.get('/devices',authenticateToken,  async (req, res) => {
   try {
     const devices = await db.collection("devices_collection").find({}).toArray();
     res.status(200).json(devices);
@@ -682,7 +726,7 @@ app.delete('/devices/:id', authenticateToken, async (req, res) => {
 }); */
 
 
-app.delete('/devices/:id', authenticateToken, async (req, res) => {
+app.delete('/devices/:id', authenticateToken,  async (req, res) => {
   console.log("Attempting to delete a device and its jobs with ID:", req.params.id);
   try {
     // Step 1: Delete the device
@@ -720,7 +764,7 @@ app.delete('/devices/:id', authenticateToken, async (req, res) => {
 //------------------------------------------------------------------------------------------------
 
 // Add new job
-app.post('/repairs', authenticateToken, async (req, res) => {
+app.post('/repairs', authenticateToken,  async (req, res) => {
   try {
     const { client, device, job } = req.body;
 
@@ -836,7 +880,7 @@ function generateUniqueCode() {
 
 
 // Endpoint to fetch a specific job's details along with the related device and client
-app.get('/repairs_get_infos/:jobId', authenticateToken, async (req, res) => {
+app.get('/repairs_get_infos/:jobId', authenticateToken,  async (req, res) => {
 
   console.log("----------------------");
   console.log("----------------------");
@@ -881,7 +925,7 @@ app.get('/repairs_get_infos/:jobId', authenticateToken, async (req, res) => {
 
 
 //read
-app.get('/repairs', authenticateToken, async (req, res) => {
+app.get('/repairs', authenticateToken,   async (req, res) => {
   try {
     const repairs = await db.collection("repairs_collection").find({}).toArray();
     res.status(200).json(repairs);
@@ -944,7 +988,7 @@ app.put('/repairs/:id', authenticateToken, async (req, res) => {
 }); */
 
 
-app.put('/repairs_status/:id', authenticateToken, async (req, res) => {
+app.put('/repairs_status/:id', authenticateToken,  async (req, res) => {
   const { id } = req.params;
   const { status, exitDate } = req.body; // Capture status and optionally an exit date from the request body
 
@@ -979,7 +1023,7 @@ app.put('/repairs_status/:id', authenticateToken, async (req, res) => {
 
 
 //delete
-app.delete('/repairs/:id', authenticateToken, async (req, res) => {
+app.delete('/repairs/:id', authenticateToken,  async (req, res) => {
   try {
     const result = await db.collection("repairs_collection").deleteOne({ _id: new ObjectId(req.params.id) });
     res.status(200).json(result);
@@ -989,7 +1033,7 @@ app.delete('/repairs/:id', authenticateToken, async (req, res) => {
 });
 
 // List all the repairs job
-app.get('/repair-jobs', authenticateToken, async (req, res) => {
+app.get('/repair-jobs', authenticateToken,  async (req, res) => {
   try {
     // Fetch all repair jobs
     const repairJobs = await db.collection("repairs_collection").find({}).toArray();
