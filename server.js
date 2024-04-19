@@ -221,15 +221,21 @@ app.get('/protected', authenticateToken,  (req, res) => {
 //                        CRUD FOR CLIENTS
 //------------------------------------------------------------------------------------------------
 
-// Add
-app.post('/clients', authenticateToken,  async (req, res) => {
+// Add client with createdAt field
+app.post('/clients', authenticateToken, async (req, res) => {
+  const newClient = {
+    ...req.body,
+    createdAt: new Date()  // Adding current date as createdAt field
+  };
+
   try {
-    const result = await db.collection("clients_collection").insertOne(req.body);
+    const result = await db.collection("clients_collection").insertOne(newClient);
     res.status(201).send(result);
   } catch (error) {
     res.status(500).send(error.message);
   }
 });
+
 
 // Read
 app.get('/clients', authenticateToken,  async (req, res) => {
@@ -251,6 +257,7 @@ app.get('/clients-infinite', authenticateToken,  async (req, res) => {
     const pageSize = parseInt(req.query.pageSize) || 20;
     const searchTerm = req.query.searchTerm || '';
     const skip = (page - 1) * pageSize;
+    const sortOrder = req.query.sortOrder || 'desc'; // Default to descending
 
     let query = {};
     if (searchTerm) {
@@ -263,8 +270,17 @@ app.get('/clients-infinite', authenticateToken,  async (req, res) => {
       };
     }
 
+        // Define sorting logic
+        let sortOptions = {};
+        if (sortOrder === 'desc') {
+          sortOptions.createdAt = -1; // Sort by createdAt descending
+        } else {
+          sortOptions.createdAt = 1; // Sort by createdAt ascending
+        }
+
     const result = await db.collection("clients_collection")
                            .find(query)
+                           .sort(sortOptions)
                            .skip(skip)
                            .limit(pageSize)
                            .toArray();
@@ -612,7 +628,7 @@ app.get('/client-details/:id', authenticateToken,  async (req, res) => {
         emergencyLevel: job.emergencyLevel,
         uniqueCode: job.uniqueCode,
         status: job.status,
-        exitDate: job.status === "Completed" ? job.exitDate : null,
+        exitDate: job.status === "status5" ? job.exitDate : null,
         _id: job._id
       }));
     }));
@@ -953,6 +969,7 @@ app.put('/repairs/:id', authenticateToken, async (req, res) => {
         $set: {
           deviceID: deviceID,
           // Note: entryDate and uniqueCode are not updated
+          exitDate: job.status === "status5" ? new Date() : null,
           /* exitDate: job.exitDate, */
           emergencyLevel: job.emergencyLevel,
           status: job.status,
