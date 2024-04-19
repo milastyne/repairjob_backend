@@ -350,7 +350,7 @@ app.get('/clients-with-devices-and-jobs', authenticateToken,  async (req, res) =
       const devicesWithJobs = await Promise.all(devices.map(async (device) => {
         const jobs = await db.collection("repairs_collection").find({
           deviceID: device._id,
-          status: { $ne: 'status5' } // Exclude jobs with status 'status5'
+          status: { $nin: ['status5', 'status6', 'status7'] } // Exclude jobs with 'status5', 'status6', and 'status7'
         }).toArray();
 
         // Only return device if it has jobs that are not in status 'status5'
@@ -400,9 +400,18 @@ app.get('/client/:clientId/devices-and-jobs', authenticateToken,  async (req, re
 
     const devicesWithJobs = await Promise.all(devices.map(async (device) => {
       const query = { deviceID: device._id };
-      if (excludeStatus) {
+
+/*       if (excludeStatus) {
         query.status = { $ne: excludeStatus }; // Dynamically exclude specified status
+      } */
+
+      if (excludeStatuses) {
+        // Split the statuses and trim whitespace
+        const statusesToExclude = excludeStatuses.split(',').map(status => status.trim());
+        query.status = { $nin: statusesToExclude };
       }
+      
+      
       const jobs = await db.collection("repairs_collection").find(query).toArray();
 
       if (jobs.length > 0 || includeWithoutJobs) {
@@ -436,65 +445,6 @@ app.get('/client/:clientId/devices-and-jobs', authenticateToken,  async (req, re
 
 
 
-/* app.get('/client/:clientId/devices-and-jobs', authenticateToken, async (req, res) => {
-  const clientId = req.params.clientId; // Get the client ID from the request parameters
-
-  console.log("ici?????");
-
-  try {
-    // Fetch the client by ID
-    const client = await db.collection("clients_collection").findOne({ _id: new ObjectId(clientId) });
-
-    if (!client) {
-      return res.status(404).json({ message: "Client not found" });
-    }
-
-    // Fetch devices belonging to the client
-    const devices = await db.collection("devices_collection").find({ clientID: new ObjectId(clientId) }).toArray();
-    
-    // For each device, fetch jobs that are not in status 'status5'
-    const devicesWithJobs = await Promise.all(devices.map(async (device) => {
-      const jobs = await db.collection("repairs_collection").find({
-        deviceID: device._id,
-        status: { $ne: 'status5' } // Exclude jobs with status 'status5'
-      }).toArray();
-
-      // Only include device if it has jobs that are not in status 'status5'
-      if (jobs.length > 0) {
-        return {
-          ...device,
-          jobs,
-        };
-      } else {
-        return null; // Device has no jobs or all jobs are in status 'status5', so it's excluded
-      }
-    }));
-
-    // Filter out null values from devicesWithJobs, which indicates devices without relevant jobs
-    const filteredDevicesWithJobs = devicesWithJobs.filter(device => device !== null);
-
-
-    console.log("-------------------------------------");
-    console.log("CLIENT WITH DEVICES");
-    console.log("-------------------------------------");
-    console.log("client id :" + clientId);
-    console.log(filteredDevicesWithJobs);
-
-    // Return the client with their devices that have at least one job not in status 'status5'
-    res.status(200).json({
-      ...client,
-      devices: filteredDevicesWithJobs,
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: error.message });
-  }
-});  */
-
-
-
-
-
 // Update
 app.put('/clients/:id', authenticateToken,   async (req, res) => {
   try {
@@ -508,39 +458,6 @@ app.put('/clients/:id', authenticateToken,   async (req, res) => {
   }
 });
 
-/* // Delete
-app.delete('/clients/:id', authenticateToken, async (req, res) => {
-  try {
-    const result = await db.collection("clients_collection").deleteOne({ _id: new ObjectId(req.params.id) });
-    res.status(200).json(result);
-  } catch (error) {
-    res.status(500).send(error.message);
-  }
-}); */
-
-/* // Delete client and associated devices and repairs
-app.delete('/clients/:id', authenticateToken, async (req, res) => {
-  const clientId = new ObjectId(req.params.id);
-
-  try {
-    // Step 1: Identify and delete all devices associated with the client
-    const devices = await db.collection("devices_collection").find({ clientId: clientId }).toArray();
-    if (devices.length > 0) {
-      const deviceIds = devices.map(device => device._id);
-      // Delete these devices
-      await db.collection("devices_collection").deleteMany({ _id: { $in: deviceIds } });
-
-      // Step 2: Delete all repair jobs associated with these devices
-      await db.collection("repairs_collection").deleteMany({ deviceId: { $in: deviceIds } });
-    }
-
-    // Step 3: Finally, delete the client
-    const result = await db.collection("clients_collection").deleteOne({ _id: clientId });
-    res.status(200).json(result);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-}); */
 
 
 // Delete client and associated devices and repairs
@@ -639,7 +556,7 @@ app.get('/client-details/:id', authenticateToken,  async (req, res) => {
 
     // Define a map for emergency levels and statuses to sort by
     const emergencyLevels = { 'High': 3, 'Medium': 2, 'Low': 1 };
-    const statusOrder = { 'status1': 1, 'status2': 2, 'status3': 3, 'status4': 4, 'status5': 5 };
+    const statusOrder = { 'status1': 1, 'status2': 2, 'status3': 3, 'status4': 4, 'status5': 5, 'status6': 6, 'status7': 7 };
 
     allJobsDetails.sort((a, b) => {
   
@@ -729,17 +646,7 @@ app.put('/devices/:id', authenticateToken, async (req, res) => {
 
 
 
-/* //delete
-app.delete('/devices/:id', authenticateToken, async (req, res) => {
-  console.log("we are deleting")
-  try {
-    //const result = await db.collection("devices_collection").deleteOne({ _id: new ObjectId(req.params.id) });
-    //res.status(200).json(result);
-    
-  } catch (error) {
-    //res.status(500).json({ message: error.message });
-  }
-}); */
+
 
 
 app.delete('/devices/:id', authenticateToken,  async (req, res) => {
@@ -874,25 +781,7 @@ async function getNextJobID() {
   }
 }
 
-/*
-function generateUniqueCode() {
-  // Get the current date and time
-  const now = new Date();
 
-  // Format the date and time components
-  const day = now.getDate().toString().padStart(2, '0');
-  const month = (now.getMonth() + 1).toString().padStart(2, '0'); // +1 because months are 0-indexed
-  const year = now.getFullYear().toString().slice(-2); // Just get the last two digits of the year
-
-  const hours = now.getHours().toString().padStart(2, '0');
-  const minutes = now.getMinutes().toString().padStart(2, '0');
-  const seconds = now.getSeconds().toString().padStart(2, '0');
-
-  // Construct the code
-  const code = `${prefix}-${day}${month}${year}-${hours}${minutes}${seconds}`;
-
-  return code;
-}*/
 
 
 // Endpoint to fetch a specific job's details along with the related device and client
@@ -991,18 +880,6 @@ app.put('/repairs/:id', authenticateToken, async (req, res) => {
 });
 
 
-/* //update
-app.put('/repairs/:id', authenticateToken, async (req, res) => {
-  try {
-    const result = await db.collection("repairs_collection").updateOne(
-      { _id: new ObjectId(req.params.id) },
-      { $set: req.body }
-    );
-    res.status(200).json(result);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-}); */
 
 
 app.put('/repairs_status/:id', authenticateToken,  async (req, res) => {
@@ -1106,7 +983,7 @@ app.get('/repair-jobs', authenticateToken,  async (req, res) => {
 
 
   const emergencyLevels = { 'High': 3, 'Medium': 2, 'Low': 1 };
-  const statusOrder = { 'status1': 1, 'status2': 2, 'status3': 3, 'status4': 4, 'status5': 5 };
+  const statusOrder = { 'status1': 1, 'status2': 2, 'status3': 3, 'status4': 4, 'status5': 5, 'status6': 6, 'status7': 7 };
 
   allJobsDetails.sort((a, b) => {
   
