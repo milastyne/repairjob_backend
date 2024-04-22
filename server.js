@@ -405,9 +405,9 @@ app.get('/client/:clientId/devices-and-jobs', authenticateToken,  async (req, re
         query.status = { $ne: excludeStatus }; // Dynamically exclude specified status
       } */
 
-      if (excludeStatuses) {
+      if (excludeStatus) {
         // Split the statuses and trim whitespace
-        const statusesToExclude = excludeStatuses.split(',').map(status => status.trim());
+        const statusesToExclude = excludeStatus.split(',').map(status => status.trim());
         query.status = { $nin: statusesToExclude };
       }
       
