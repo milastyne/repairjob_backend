@@ -542,7 +542,6 @@ app.get('/client-details/:id', authenticateToken,  async (req, res) => {
         serial: device.serial,
         issue: job.issue,
         notes: job.notes,
-        amountPaid: job.amountPaid,
         emergencyLevel: job.emergencyLevel,
         uniqueCode: job.uniqueCode,
         status: job.status,
@@ -748,8 +747,7 @@ app.post('/repairs', authenticateToken,  async (req, res) => {
       status: job.status,
       uniqueCode: uniqueCode,
       issue: job.issue,
-      notes: job.notes,
-      amountPaid: job.amountPaid || 0  // Default to 0 if not provided
+      notes: job.notes
     };
 
     const jobResult = await db.collection("repairs_collection").insertOne(newJobData);
@@ -811,8 +809,7 @@ app.get('/repairs_get_infos/:jobId', authenticateToken,  async (req, res) => {
         status: job.status,
         uniqueCode: job.uniqueCode,
         issue: job.issue,
-        notes: job.notes,
-        amountPaid: job.amountPaid
+        notes: job.notes
     };
 
     if(isDebug) {
@@ -867,7 +864,6 @@ app.put('/repairs/:id', authenticateToken, async (req, res) => {
           status: job.status,
           issue: job.issue,
           notes: job.notes,
-          amountPaid: job.amountPaid || 0 // ✅ Adding amountPaid
         }
       }
     );
@@ -971,7 +967,6 @@ app.get('/repair-jobs', authenticateToken,  async (req, res) => {
         serial: device.serial,
         issue: job.issue,
         notes: job.notes,
-        amountPaid: job.amountPaid,
         emergencyLevel: job.emergencyLevel,
         clientID : client._id,
         clientName: `${client.firstName} ${client.lastName}`,
@@ -1009,59 +1004,6 @@ app.get('/repair-jobs', authenticateToken,  async (req, res) => {
     
   }
 });
-
-
-//------------------------------------------------------------------------------------------------
-//                        CRUD FOR REPAIRS
-//------------------------------------------------------------------------------------------------
-
-app.get('/monthly-reports', authenticateToken, async (req, res) => {
-  const { startDate, endDate } = req.query;
-
-  // Ensure both dates are provided and valid
-  if (!startDate || !endDate) {
-      return res.status(400).json({ message: "Both startDate and endDate are required" });
-  }
-
-  try {
-      // Convert dates to Date objects for MongoDB querying
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999); // Ensure the entire end date is included
-
-      // MongoDB aggregation pipeline to group by month and calculate totals
-      const reportData = await db.collection("repairs_collection").aggregate([
-          {
-              $match: {
-                  entryDate: { $gte: start, $lte: end }
-              }
-          },
-          {
-              $group: {
-                  _id: { $month: "$entryDate" },
-                  numberOfJobs: { $sum: 1 },
-                  totalPaid: { $sum: "$amountPaid" }
-              }
-          },
-          {
-              $sort: { _id: 1 } // Sort by month
-          }
-      ]).toArray();
-
-      // Translate the month numbers into names
-      const translatedData = reportData.map(item => ({
-          month: new Date(0, item._id - 1).toLocaleString('default', { month: 'long' }),
-          numberOfJobs: item.numberOfJobs,
-          totalPaid: item.totalPaid.toFixed(2) + " €"
-      }));
-
-      res.status(200).json(translatedData);
-  } catch (error) {
-      console.error("Error generating monthly reports:", error);
-      res.status(500).json({ message: "Failed to generate report", error: error.message });
-  }
-});
-
 
 
 
